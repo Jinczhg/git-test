@@ -2719,8 +2719,8 @@ bool Stitching::addLocalFeasMats(string outDir, vector<Point> inSeamSection, Mat
 				}
 				color_dist = (color_dist / (2 * _sigma_color*_sigma_color));
 				color_dist = exp(-color_dist);
-				aff += spatial_dist*color_dist;//用乘法？？？
-			}
+				aff += spatial_dist * color_dist;//用乘法？？？
+			}		
 			if (aff > 1){
 				local_mask0.at<uchar>(row, col) = 255;
 			}
@@ -3109,7 +3109,7 @@ bool Stitching::addLocalFeasMats(string outDir, vector<Point> inSeamSection, con
 	Mat local_mask0(__img0.size(), CV_8UC1, Scalar(0));
 	for (int row = 0; row < __simg0.rows; ++row){
 		for (int col = 0; col < __simg0.cols; ++col){
-			Point p(col, row);
+			Point p(col, row);//点p为图像上的点
 			Vec3b p_color = __simg0.at<Vec3b>(row, col);
 			float aff = 0;
 			//离缝隙中心太远的点不需要
@@ -3118,7 +3118,7 @@ bool Stitching::addLocalFeasMats(string outDir, vector<Point> inSeamSection, con
 			if (dis2center< 0.3)
 				continue;
 
-			for (auto q : seam_section0){
+			for (auto q : seam_section0){//点q为缝隙上的点
 				Vec3b q_color = __simg0.at<Vec3b>(q.y, q.x);
 				float color_dist = 0, spatial_dist = 0;
 				spatial_dist = ((p.x - q.x)*(p.x - q.x) + (p.y - q.y)*(p.y - q.y)) / (2 * _sigma_spatial*_sigma_spatial);
@@ -3130,7 +3130,7 @@ bool Stitching::addLocalFeasMats(string outDir, vector<Point> inSeamSection, con
 				}
 				color_dist = (color_dist / (2 * _sigma_color*_sigma_color));
 				color_dist = exp(-color_dist);
-				aff += spatial_dist*color_dist;//用乘法？？？
+				aff += spatial_dist*color_dist;//用乘法？？？这个式子导致与缝隙点数目有关
 			}
 			if (aff > 1){
 				local_mask0.at<uchar>(row, col) = 255;
@@ -3514,10 +3514,10 @@ vector<Point> Stitching::getSeamSection(string outDir, Mat &seamQualityMap, Mat 
 		return vector<Point>();
 	}
 
-	//找到最长的缝隙片段
+	//按照线段长度排序
 	sort(contours_refined.begin(), contours_refined.end(),
 		[](const vector<Point> &a, const vector<Point> &b)
-	{return a.size() > b.size(); });//按照线段长度排序
+	{return a.size() > b.size(); });
 
 	//调试
 	Mat sel_con_img;
@@ -4861,15 +4861,23 @@ bool Stitching::iteration(string outDir, int idx)
 	
 	while (!(H_flag&&Pass_flag)){//当H不符合要求，或者缝隙没有穿过配准区域时，循环		
 		seam_section = getSeamSection(string(preit_dir_name) + "/Result", __seam_quality_map, __seam_mask, selcon_idx);//找缝隙段
+		cout << "缝隙长度： " << seam_section.size()<< endl;
 		if (seam_section.size() == 0){
 			return 1;
 		}
+		if (seam_section.size() < 20){
+			cout << "缝隙过短！！！" << endl;
+			selcon_idx++;
+			cout << endl;
+			cout << "Select Seam Section ====>No." << selcon_idx << endl;
+			continue;
+		}
 		bool is_Homo_valid;
 		if (idx == 0){//以缝隙段初始化特征点和匹配点
-			is_Homo_valid = addLocalFeasMats(dir_name, seam_section, _H, feas, mats);
+			is_Homo_valid = addLocalFeasMats(dir_name, seam_section, _H, feas, mats);//上一次为全局配准
 		}
 		else{
-			is_Homo_valid = addLocalFeasMats(dir_name, seam_section, _meshwarper, feas, mats);
+			is_Homo_valid = addLocalFeasMats(dir_name, seam_section, _meshwarper, feas, mats);//上一次为局部配准
 		}
 		
 		cout << "AddLocalFeasMats" << endl;
