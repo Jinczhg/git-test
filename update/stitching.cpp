@@ -15,6 +15,7 @@ using cv::imwrite;
 
 #define sigma_spatial_init 40
 #define sigma_color_init 6
+#define spatial_weight 0.5
 
 
 float bad_thre = 0.6;
@@ -2707,6 +2708,7 @@ bool Stitching::addLocalFeasMats(string outDir, vector<Point> inSeamSection, Mat
 				continue;
 
 			//计算点p和q的位置距离与颜色距离，得到相似度
+			//vector<float> aff_vec0;
 			for (auto q : seam_section0){
 				Vec3b q_color = __simg0.at<Vec3b>(q.y, q.x);
 				float color_dist = 0, spatial_dist = 0;
@@ -2719,9 +2721,13 @@ bool Stitching::addLocalFeasMats(string outDir, vector<Point> inSeamSection, Mat
 				}
 				color_dist = (color_dist / (2 * _sigma_color*_sigma_color));
 				color_dist = exp(-color_dist);
-				aff += spatial_dist * color_dist;//用乘法？？？
-			}		
-			if (aff > 1){
+				//aff += spatial_dist * color_dist;//用乘法？？？
+				aff += spatial_dist * spatial_weight + color_dist*(1 - spatial_weight);
+				//aff_vec0.push_back(aff);
+			}
+			aff = aff / seam_section0.size();
+			//aff = *(max_element(aff_vec0.begin(), aff_vec0.end()));
+			if (aff > 0.35){
 				local_mask0.at<uchar>(row, col) = 255;
 			}
 		}
@@ -2754,6 +2760,7 @@ bool Stitching::addLocalFeasMats(string outDir, vector<Point> inSeamSection, Mat
 			if (dis2center< 0.3)
 				continue;
 
+			//vector<float> aff_vec1;
 			for (auto q : seam_section1){
 				Vec3b q_color = __simg1.at<Vec3b>(q.y, q.x);
 				float color_dist = 0, spatial_dist = 0;
@@ -2766,9 +2773,13 @@ bool Stitching::addLocalFeasMats(string outDir, vector<Point> inSeamSection, Mat
 				}
 				color_dist = (color_dist / (2 * _sigma_color*_sigma_color));
 				color_dist = exp(-color_dist);
-				aff += spatial_dist*color_dist;//用乘法？？？
+				//aff += spatial_dist*color_dist;//用乘法？？？
+				aff += spatial_dist * spatial_weight + color_dist*(1 - spatial_weight);
+				//aff_vec1.push_back(aff);
 			}
-			if (aff > 1){
+			//aff = *(max_element(aff_vec1.begin(), aff_vec1.end()));
+			aff = aff / seam_section1.size();
+			if (aff > 0.35){
 				local_mask1.at<uchar>(row, col) = 255;
 			}
 		}
@@ -3130,9 +3141,11 @@ bool Stitching::addLocalFeasMats(string outDir, vector<Point> inSeamSection, con
 				}
 				color_dist = (color_dist / (2 * _sigma_color*_sigma_color));
 				color_dist = exp(-color_dist);
-				aff += spatial_dist*color_dist;//用乘法？？？这个式子导致与缝隙点数目有关
+				//aff += spatial_dist*color_dist;//用乘法？？？这个式子导致与缝隙点数目有关
+				aff += spatial_dist * spatial_weight + color_dist*(1 - spatial_weight);
 			}
-			if (aff > 1){
+			aff = aff / seam_section0.size();
+			if (aff > 0.35){
 				local_mask0.at<uchar>(row, col) = 255;
 			}
 		}
@@ -3179,9 +3192,11 @@ bool Stitching::addLocalFeasMats(string outDir, vector<Point> inSeamSection, con
 				}
 				color_dist = (color_dist / (2 * _sigma_color*_sigma_color));
 				color_dist = exp(-color_dist);
-				aff += spatial_dist*color_dist;//用乘法？？？
+				//aff += spatial_dist*color_dist;//用乘法？？？
+				aff += spatial_dist * spatial_weight + color_dist*(1 - spatial_weight);
 			}
-			if (aff > 1){
+			aff = aff / seam_section1.size();
+			if (aff > 0.35){
 				local_mask1.at<uchar>(row, col) = 255;
 			}
 		}
@@ -4862,7 +4877,8 @@ bool Stitching::iteration(string outDir, int idx)
 	while (!(H_flag&&Pass_flag)){//当H不符合要求，或者缝隙没有穿过配准区域时，循环		
 		seam_section = getSeamSection(string(preit_dir_name) + "/Result", __seam_quality_map, __seam_mask, selcon_idx);//找缝隙段
 		cout << "缝隙长度： " << seam_section.size()<< endl;
-		if (seam_section.size() == 0){
+		if (seam_section.size() == 0){//缝隙遍历完,迭代终止
+			cout << "缝隙遍历完,迭代终止！！！" << endl;
 			return 1;
 		}
 		if (seam_section.size() < 20){
@@ -4871,6 +4887,18 @@ bool Stitching::iteration(string outDir, int idx)
 			cout << endl;
 			cout << "Select Seam Section ====>No." << selcon_idx << endl;
 			continue;
+		}
+
+		if (_sigma_spatial > 90){//达到sigma上界
+			_sigma_spatial = sigma_spatial_init;
+			if (selcon_idx < seam_section.size()){//换一条缝隙，直到缝隙遍历完
+				selcon_idx++;
+				cout << endl;
+				cout << "Select Seam Section ====>No." << selcon_idx << endl;
+			}
+			else{//缝隙遍历完,迭代终止
+				return 1;
+			}
 		}
 		bool is_Homo_valid;
 		if (idx == 0){//以缝隙段初始化特征点和匹配点
@@ -4892,54 +4920,10 @@ bool Stitching::iteration(string outDir, int idx)
 			H_flag = false;
 		else
 			H_flag = is_Homo_valid && isHomoCorrect((double*)mats[1].H.data);
-		if (!H_flag){//如果H无效，则选取次差的缝隙段
+		if (!H_flag){//如果H无效，则扩大范围
 			cout << "Invalid Homography" << endl;
-			if (_sigma_spatial < 90){//未到sigma上界
-				_sigma_spatial += 10;
-				cout << "sigma_spatial--------->" << _sigma_spatial << endl;
-			}
-			else{//达到sigma上界
-				_sigma_spatial = sigma_spatial_init;
-				if (selcon_idx < seam_section.size()){//换一条缝隙，直到缝隙遍历完
-					/*
-					标记导致H无效的缝隙片段区域，得到mask0_avoid、mask1_avoid
-					*/
-					vector<Point> pts0, pts1;
-					//把seam_section进行坐标变换，得到点集pts0和pts1
-					if (idx == 0){//上次迭代为全局配准
-						for (auto &pt : seam_section){
-							Point pt0 = canPt2orgPt0(pt, _H, __corners);
-							Point pt1 = canPt2orgPt1(pt, __corners);
-							pts0.push_back(pt0);
-							pts1.push_back(pt1);
-						}
-					}
-					else{//上次迭代为局部配准
-						for (auto &pt : seam_section){
-							Point pt0 = canPt2orgPt0(pt, _meshwarper, __corners);
-							Point pt1 = canPt2orgPt1(pt, __corners);
-							pts0.push_back(pt0);
-							pts1.push_back(pt1);
-						}
-					}
-					//从pts0、pts1点集得到mask0_avoid，mask1_avoid
-					Mat pts0_avoid = getMaskfromPoints(__img0.size(), pts0);
-					dilate(pts0_avoid, pts0_avoid, Mat(), Point(-1, -1), 5);//膨胀pts0_avoid	
-					Mat pts1_avoid = getMaskfromPoints(__img1.size(), pts1);
-					dilate(pts1_avoid, pts1_avoid, Mat(), Point(-1, -1), 5);//膨胀mask1_avoid
-					mask0_avoid = mask0_avoid | pts0_avoid;
-					mask1_avoid = mask1_avoid | pts1_avoid;
-					imwrite(string(dir_name) + "/Result/mask0_avoid.jpg", mask0_avoid);
-					imwrite(string(dir_name) + "/Result/mask1_avoid.jpg", mask1_avoid);
-
-					selcon_idx++;
-					cout << endl;
-					cout << "Select Seam Section ====>No." << selcon_idx << endl;
-				}		
-				else{//缝隙遍历完,迭代终止
-					return 1;
-				}		
-			}
+			_sigma_spatial += 10;
+			cout << "sigma_spatial--------->" << _sigma_spatial << endl;	
 		}
 		else{//当前H有效，则进行配准、找缝隙
 			cout << "Valid Homography" << endl;
@@ -4965,10 +4949,10 @@ bool Stitching::iteration(string outDir, int idx)
 			else{
 				cout << "H is wrong:" << endl;
 				//cout << mixed_mats[1].H << endl;
-				_sigma_spatial += 5;
-				selcon_idx = 0;
+				_sigma_spatial += 10;
+				//selcon_idx = 0;
 				cout << endl << endl;
-				cout << "sigma_spatial :" << _sigma_spatial << endl;
+				cout << "sigma_spatial--------->" << _sigma_spatial << endl;
 				continue;
 			}
 			AlignmentbyH(H);
@@ -5033,7 +5017,7 @@ bool Stitching::iteration(string outDir, int idx)
 			if (!Pass_flag){//若没有穿过，则下次循环将区域扩大
 				cout << "Seam Doesn't Pass through Aligned Area" << endl;
 				_sigma_spatial += 10;
-				cout << endl << endl;
+				cout << endl ;
 				cout << "sigma_spatial--------->" << _sigma_spatial << endl;
 				_num_matches.pop_back();
 			}
